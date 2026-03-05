@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	controlpanel "github.com/langgenius/dify-plugin-daemon/internal/core/control_panel"
@@ -116,13 +117,16 @@ func InstallMultiplePluginsToTenant(
 
 	for _, job := range jobs {
 		jobCopy := job
+		// create a detached context for async task to avoid http request cancellation
+		taskCtx, taskCancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		// start a new goroutine to install the plugin
 		routine.Submit(routinepkg.Labels{
 			routinepkg.RoutineLabelKeyModule: "service",
 			routinepkg.RoutineLabelKeyMethod: "InstallPlugin",
 		}, func() {
+			defer taskCancel()
 			tasks.ProcessInstallJob(
-				ctx,
+				taskCtx,
 				manager,
 				tenants,
 				runtimeType,
@@ -316,10 +320,10 @@ func UninstallPlugin(
 		db.Equal("tenant_id", tenant_id),
 		db.Equal("id", plugin_installation_id),
 	)
-	if err == db.ErrDatabaseNotFound {
-		return exception.ErrPluginNotFound().ToResponse()
-	}
 	if err != nil {
+		if errors.Is(err, db.ErrDatabaseNotFound) {
+			return entities.NewSuccessResponse(true)
+		}
 		return exception.InternalServerError(err).ToResponse()
 	}
 
@@ -349,7 +353,7 @@ func UninstallPlugin(
 	pluginInstallationCacheKey := helper.PluginInstallationCacheKey(pluginUniqueIdentifier.PluginID(), tenant_id)
 	_, _ = cache.AutoDelete[models.PluginInstallation](pluginInstallationCacheKey)
 
-	if deleteResponse.IsPluginDeleted && deleteResponse.Plugin != nil && deleteResponse.Plugin.InstallType == plugin_entities.PLUGIN_RUNTIME_TYPE_LOCAL {
+	if deleteResponse != nil && deleteResponse.IsPluginDeleted && deleteResponse.Plugin != nil && deleteResponse.Plugin.InstallType == plugin_entities.PLUGIN_RUNTIME_TYPE_LOCAL {
 		manager := plugin_manager.Manager()
 		if manager == nil {
 			return exception.InternalServerError(errors.New("plugin manager is not initialized")).ToResponse()
@@ -360,7 +364,7 @@ func UninstallPlugin(
 		}
 
 		shutdownCh, err := manager.ShutdownLocalPluginGracefully(pluginUniqueIdentifier)
-		if err == controlpanel.ErrLocalPluginRuntimeNotFound {
+		if errors.Is(err, controlpanel.ErrLocalPluginRuntimeNotFound) {
 			return entities.NewSuccessResponse(true)
 		} else if err != nil {
 			return exception.InternalServerError(err).ToResponse()
