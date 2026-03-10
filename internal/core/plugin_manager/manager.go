@@ -183,6 +183,11 @@ func (p *PluginManager) Config() *app.Config {
 	return p.config
 }
 
+// IsReady reports whether all installed plugins have been launched and are ready to serve requests.
+func (p *PluginManager) IsReady() bool {
+	return p.controlPanel.IsReady()
+}
+
 // check if the plugin is already running on this node
 func (c *PluginManager) NeedRedirecting(
 	identity plugin_entities.PluginUniqueIdentifier,

@@ -1,9 +1,11 @@
 package controllers
 
 import (
+	"net/http"
 	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
+	"github.com/langgenius/dify-plugin-daemon/internal/core/plugin_manager"
 	"github.com/langgenius/dify-plugin-daemon/internal/types/app"
 	"github.com/langgenius/dify-plugin-daemon/pkg/manifest"
 	"github.com/langgenius/dify-plugin-daemon/pkg/utils/routine"
@@ -40,6 +42,24 @@ func HealthCheck(app *app.Config) gin.HandlerFunc {
 			"platform":                 app.Platform,
 			"active_requests":          activeRequests,
 			"active_dispatch_requests": activeDispatchRequests,
+		})
+	}
+}
+
+// ReadinessCheck returns 200 only when all installed plugins have been initialized
+// and are ready to serve requests. Returns 503 while plugins are still starting up.
+// This endpoint is intended for use as a startup/readiness probe so that traffic
+// is not routed to the instance during plugin pre-compilation.
+func ReadinessCheck(manager *plugin_manager.PluginManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !manager.IsReady() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "initializing",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ready",
 		})
 	}
 }

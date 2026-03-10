@@ -109,3 +109,29 @@ func NewControlPanel(
 func (c *ControlPanel) SetCluster(cluster *cluster.Cluster) {
 	c.cluster = cluster
 }
+
+// IsReady returns true when all installed plugins have been launched and are ready to serve requests.
+// This is intended for use by readiness probes (e.g. /health/ready) so that traffic is not
+// routed to the instance until plugin pre-compilation and initialization have completed.
+func (c *ControlPanel) IsReady() bool {
+	installed, err := c.installedBucket.List()
+	if err != nil {
+		return false
+	}
+
+	// no plugins installed means ready
+	if len(installed) == 0 {
+		return true
+	}
+
+	readyCount := 0
+	c.localPluginRuntimes.Range(func(
+		key plugin_entities.PluginUniqueIdentifier,
+		value *local_runtime.LocalPluginRuntime,
+	) bool {
+		readyCount++
+		return true
+	})
+
+	return readyCount >= len(installed)
+}
